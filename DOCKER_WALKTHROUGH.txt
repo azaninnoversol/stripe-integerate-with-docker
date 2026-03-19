@@ -1,0 +1,92 @@
+Docker Setup Walkthrough (stripe-integrate)
+
+1) Ye Docker kyun?
+- Tumhara Next.js project (App Router + API routes) ko container me chalane se:
+  - Same environment local vs production jaisa rehta hai
+  - “Works on my machine” issue kam hota hai
+  - Production consistency milti hai
+
+2) Dockerfile kaise banaya (optimized multi-stage)
+- Multi-stage ka matlab: different steps ko different stages me run karna.
+- Is se image chhoti hoti hai aur build clean hota hai.
+
+Stages:
+A) deps
+   - `npm ci` karke dependencies install hoti hain (cache friendly)
+
+B) builder
+   - code copy hota hai aur `npm run build` run hota hai (Next build)
+
+C) dev (TARGET: `dev`)
+   - `next dev` run hota hai (local development)
+   - Hot reload type experience
+
+D) runner (default / production)
+   - `next start` run hota hai
+   - Sirf production deps + .next + public copy hota hai (small runtime image)
+
+Docker file names aur role:
+- `Dockerfile`
+  - Image banata hai (prod me `next start`, dev target me `next dev`)
+- `docker-compose.yml`
+  - Local me dev/prod run ke liye easy commands deta hai (`--profile dev|prod`)
+  - Env vars `.env` se inject karta hai (`env_file`)
+- `.dockerignore`
+  - Build context se heavy files/secrets exclude karta hai (faster + safer build)
+- `.env` (runtime secrets)
+  - Stripe/Firebase env vars yahan se container/server ko milti hain
+- `.github/workflows/ci.yml`
+  - GitHub Actions CI: har `main` push pe `npm ci` + `npm run build` verify karta hai (Docker deploy nahi)
+  
+3) .dockerignore kyun?
+- `.dockerignore` se Docker build context me heavy/secret files include nahi hote:
+  - `node_modules`, `.next`, `.env`, git metadata, logs, etc.
+- Ye build ko fast + safe banata hai.
+
+4) Environment variables kaise handle hote hain
+- Tum secrets Dockerfile me bake nahi karte.
+- Docker / Compose run time pe env vars `.env` se pass karta hai.
+- Next server (API routes) ko env vars chahiye:
+  - STRIPE_SECRET_KEY
+  - STRIPE_WEBHOOK_SECRET
+  - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+  - NEXT_PUBLIC_APP_URL
+  - FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY
+
+Important fix:
+- `lib/stripe.ts` ko “lazy init” kiya: build time pe secret missing ho to crash na ho.
+- Stripe API routes me direct `getStripe()` call hota hai (runtime pe env check hota hai).
+
+5) docker-compose kyun / kaise?
+- Compose local me easy commands deta hai:
+  - `--profile dev` => dev target (next dev)
+  - `--profile prod` => production-like target (next start)
+- Dev mode me volumes use hote hain for live code changes.
+
+Commands:
+- Dev:
+  docker compose --profile dev up --build
+- Prod:
+  docker compose --profile prod up --build
+
+Open:
+- http://localhost:5000
+
+6) CI (GitHub Actions) build verify
+- File: `.github/workflows/ci.yml`
+- Trigger: `main` branch pe har push ke baad workflow run hoti hai
+- Steps (simple):
+  - Code checkout hota hai (`actions/checkout`)
+  - Node.js set hota hai (`actions/setup-node`) + npm cache use hota hai
+  - Dependencies install hoti hain (`npm ci`)
+  - Production build verify hoti hai (`npm run build`)
+- Docker deploy kyun nahi?
+  - CI ka purpose “build is ok?” check karna hai; Vercel deploy separate hota hai
+- Env vars ka kya?
+  - Build crash na ho is liye `lib/stripe.ts` ko lazy init kiya gaya tha
+  - Runtime pe env vars zaroori hote hain (CI me nahi)
+
+7) Vercel deploy
+- Vercel Docker use nahi karta by default for Next apps.
+- API routes serverless me run hote hain, so env vars Vercel console me set karne hote hain.
+

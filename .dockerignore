@@ -1,0 +1,21 @@
+node_modules
+.next
+dist
+.git
+.github
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Docker files
+Dockerfile
+.dockerignore
+
+# Local env / secrets (inject via env vars at runtime)
+.env
+.env.*
+backend-project-*.json
+
+# Next build artifacts / caches
+.turbo
