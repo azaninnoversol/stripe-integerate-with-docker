@@ -41,3 +41,6 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+backend-project-def1a-firebase-adminsdk-fbsvc-028fdad6e2.json
+*-firebase-adminsdk-*.json
