@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { getStripe } from "@/lib/stripe";
+import { getAdminFirestore, USERS_COLLECTION } from "@/lib/firebase-admin";
 
 export const runtime = "nodejs";
 
@@ -51,6 +52,20 @@ export async function POST(req: Request) {
         });
         customerId = newCustomer.id;
       }
+    }
+
+    // Persist a stable mapping early so plan lookup can fallback by uid even
+    // when webhook delivery is delayed or missed in local development.
+    if (customerId && uid) {
+      const db = getAdminFirestore();
+      await db.collection(USERS_COLLECTION).doc(uid).set(
+        {
+          email: trimmedEmail || null,
+          stripeCustomerId: customerId,
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      );
     }
 
     const appUrl = getAppUrl();

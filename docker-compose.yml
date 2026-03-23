@@ -22,7 +22,7 @@ services:
       context: .
       target: runner
     ports:
-      - "5000:5000"
+      - "5000:3000"
     env_file:
       - .env
     environment:

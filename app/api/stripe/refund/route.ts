@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
-import { getAdminFirestore } from "@/lib/firebase-admin";
+import { getAdminFirestore, INVOICES_SUBCOLLECTION, USERS_COLLECTION } from "@/lib/firebase-admin";
 import { getStripe } from "@/lib/stripe";
 
 export const runtime = "nodejs";
-
-const COLLECTION = "stripeCustomers";
 
 export async function POST(request: Request) {
   try {
@@ -28,17 +26,11 @@ export async function POST(request: Request) {
     }
 
     const db = getAdminFirestore();
-    const directRef = db.collection(COLLECTION).doc(stripeCustomerId);
-    const directSnap = await directRef.get();
-
-    let customerDocs = directSnap.exists ? [directSnap] : [];
-    if (!directSnap.exists) {
-      const byField = await db.collection(COLLECTION).where("stripeCustomerId", "==", stripeCustomerId).limit(10).get();
-      customerDocs = byField.docs;
-    }
+    const usersByStripe = await db.collection(USERS_COLLECTION).where("stripeCustomerId", "==", stripeCustomerId).limit(10).get();
+    const userDocs = usersByStripe.docs;
 
     const hasRefundBeenUsed =
-      customerDocs.length > 0 && customerDocs.some((d) => (d.data() as { refundAlreadyUsed?: boolean }).refundAlreadyUsed === true);
+      userDocs.length > 0 && userDocs.some((d) => (d.data() as { refundAlreadyUsed?: boolean }).refundAlreadyUsed === true);
 
     let refund: { id: string } | null = null;
 
@@ -109,10 +101,28 @@ export async function POST(request: Request) {
       updatePayload.refundedAt = now;
     }
 
-    if (customerDocs.length > 0) {
-      await Promise.all(customerDocs.map((d) => d.ref.set(updatePayload, { merge: true })));
-    } else {
-      await directRef.set(updatePayload, { merge: true });
+    if (userDocs.length > 0) {
+      await Promise.all(userDocs.map((d) => d.ref.set(updatePayload, { merge: true })));
+      for (const userDoc of userDocs) {
+        const invoicesSnap = await db
+          .collection(USERS_COLLECTION)
+          .doc(userDoc.id)
+          .collection(INVOICES_SUBCOLLECTION)
+          .where("subscriptionId", "==", subId)
+          .limit(1)
+          .get();
+        if (!invoicesSnap.empty) {
+          const invoiceUpdate: Record<string, unknown> = {
+            status: subscription.status,
+            updatedAt: now,
+          };
+          if (refund) {
+            invoiceUpdate.refundAlreadyUsed = true;
+            invoiceUpdate.refundedAt = now;
+          }
+          await invoicesSnap.docs[0].ref.set(invoiceUpdate, { merge: true });
+        }
+      }
     }
 
     return NextResponse.json(

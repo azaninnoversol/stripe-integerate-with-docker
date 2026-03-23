@@ -5,9 +5,9 @@ import { getAdminFirestore, USERS_COLLECTION, INVOICES_SUBCOLLECTION } from "@/l
 
 export const runtime = "nodejs";
 
-const COLLECTION = "stripeCustomers";
+type InvoiceStatus = "active" | "trialing" | "past_due" | "canceled";
 
-type CustomerPlanDoc = {
+type InvoicePayload = {
   email: string;
   customerName?: string | null;
   stripeCustomerId: string;
@@ -21,22 +21,44 @@ type CustomerPlanDoc = {
   priceCurrency: string | null;
   interval: string | null;
   intervalCount: number | null;
-  status: "active" | "trialing" | "past_due" | "canceled";
+  status: InvoiceStatus;
   currentPeriodEnd: number | null;
   updatedAt: number;
-  lastRefundedAt?: number | null;
-  lastRefundId?: string | null;
-  lastChargeId?: string | null;
 };
 
-async function upsertCustomer(stripeCustomerId: string, data: Partial<CustomerPlanDoc>) {
+function normalizeEmail(email?: string | null) {
+  return (email ?? "").trim().toLowerCase();
+}
+
+async function getUidFromEmail(email?: string | null) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return null;
+
   const db = getAdminFirestore();
-  const ref = db.collection(COLLECTION).doc(stripeCustomerId);
-  const update: Record<string, unknown> = {
-    ...data,
-    updatedAt: Date.now(),
-  };
-  await ref.set(update, { merge: true });
+  const userSnap = await db.collection(USERS_COLLECTION).where("email", "==", normalizedEmail).limit(1).get();
+  if (userSnap.empty) return null;
+  return userSnap.docs[0].id;
+}
+
+async function appendInvoiceByUid(uid: string, payload: InvoicePayload) {
+  const db = getAdminFirestore();
+  await db.collection(USERS_COLLECTION).doc(uid).collection(INVOICES_SUBCOLLECTION).add(payload);
+}
+
+async function appendInvoiceByEmailOrUid(
+  payload: InvoicePayload,
+  opts?: { uid?: string | null; fallbackEmail?: string | null }
+) {
+  const uidFromMetadata = opts?.uid?.trim();
+  const uid = uidFromMetadata || (await getUidFromEmail(opts?.fallbackEmail ?? payload.email));
+  if (!uid) return;
+  await appendInvoiceByUid(uid, payload);
+}
+
+async function getStripeCustomerEmail(stripe: Stripe, customerId: string) {
+  const customer = await stripe.customers.retrieve(customerId);
+  if (customer.deleted) return "";
+  return normalizeEmail(("email" in customer ? customer.email : null) ?? "");
 }
 
 export async function POST(req: Request) {
@@ -109,32 +131,8 @@ export async function POST(req: Request) {
           (subObj?.latest_invoice && (typeof subObj.latest_invoice === "string" ? subObj.latest_invoice : subObj.latest_invoice?.id)) ?? null;
         const amountFromSession = (fullSession as { amount_total?: number | null }).amount_total ?? null;
 
-        await upsertCustomer(customerId, {
-          email: emailNormalized || (email ?? ""),
-          customerName: customerName ?? null,
-          stripeCustomerId: customerId,
-          subscriptionId: subscriptionIdFromSession ?? null,
-          invoiceId: invoiceIdFromSession,
-          amount: amountFromSession,
-          plan: productName || "unknown",
-          productId: productId ?? "",
-          priceId,
-          priceAmount,
-          priceCurrency,
-          interval,
-          intervalCount,
-          status: "active",
-          currentPeriodEnd: fullSession.subscription
-            ? (() => {
-                const sub = fullSession.subscription as unknown as { current_period_end?: number } | undefined;
-                return sub?.current_period_end ?? null;
-              })()
-            : null,
-        });
-
-        const uid = fullSession.metadata?.uid?.trim();
         const now = Date.now();
-        const invoicePayload: Record<string, unknown> = {
+        const invoicePayload: InvoicePayload = {
           email: emailNormalized || (email ?? ""),
           customerName: customerName ?? null,
           stripeCustomerId: customerId,
@@ -157,14 +155,11 @@ export async function POST(req: Request) {
             : null,
           updatedAt: now,
         };
-        if (uid) {
-          const db = getAdminFirestore();
-          await db.collection(USERS_COLLECTION).doc(uid).set(
-            { stripeCustomerId: customerId, updatedAt: now },
-            { merge: true }
-          );
-          await db.collection(USERS_COLLECTION).doc(uid).collection(INVOICES_SUBCOLLECTION).add(invoicePayload);
-        }
+
+        await appendInvoiceByEmailOrUid(invoicePayload, {
+          uid: fullSession.metadata?.uid ?? null,
+          fallbackEmail: emailNormalized,
+        });
         break;
       }
 
@@ -189,8 +184,10 @@ export async function POST(req: Request) {
         const subPeriodEnd = (subscription as { current_period_end?: number }).current_period_end ?? null;
         const invoiceIdPaid = invoice.id ?? null;
         const amountPaid = invoice.amount_paid ?? null;
-
-        await upsertCustomer(customerId, {
+        const emailFromCustomer = await getStripeCustomerEmail(stripe, customerId);
+        const now = Date.now();
+        const invoicePayload: InvoicePayload = {
+          email: emailFromCustomer,
           stripeCustomerId: customerId,
           subscriptionId,
           invoiceId: invoiceIdPaid,
@@ -203,6 +200,12 @@ export async function POST(req: Request) {
           interval,
           intervalCount,
           currentPeriodEnd: subPeriodEnd,
+          updatedAt: now,
+          customerName: null,
+          plan: productId || "unknown",
+        };
+        await appendInvoiceByEmailOrUid(invoicePayload, {
+          fallbackEmail: emailFromCustomer,
         });
         break;
       }
@@ -216,10 +219,35 @@ export async function POST(req: Request) {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
         const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
         if (!customerId) break;
-
-        await upsertCustomer(customerId, {
+        const emailFromCustomer = await getStripeCustomerEmail(stripe, customerId);
+        const item = subscription.items.data[0];
+        const priceId = item?.price?.id ?? "";
+        const productId = typeof item?.price?.product === "string" ? item.price.product : ((item?.price?.product as Stripe.Product)?.id ?? "");
+        const priceAmount = item?.price?.unit_amount ?? null;
+        const priceCurrency = item?.price?.currency ?? null;
+        const interval = item?.price?.recurring?.interval ?? null;
+        const intervalCount = item?.price?.recurring?.interval_count ?? null;
+        const now = Date.now();
+        const invoicePayload: InvoicePayload = {
+          email: emailFromCustomer,
           stripeCustomerId: customerId,
+          subscriptionId,
+          invoiceId: invoiceFail.id ?? null,
+          amount: (invoiceFail as Stripe.Invoice & { amount_due?: number }).amount_due ?? null,
+          plan: productId || "unknown",
+          productId,
+          priceId,
+          priceAmount,
+          priceCurrency,
+          interval,
+          intervalCount,
           status: "past_due",
+          currentPeriodEnd: (subscription as { current_period_end?: number }).current_period_end ?? null,
+          updatedAt: now,
+          customerName: null,
+        };
+        await appendInvoiceByEmailOrUid(invoicePayload, {
+          fallbackEmail: emailFromCustomer,
         });
         break;
       }
@@ -238,10 +266,14 @@ export async function POST(req: Request) {
         const intervalCount = item?.price?.recurring?.interval_count ?? null;
 
         const subUpdatedPeriodEnd = (subscription as { current_period_end?: number }).current_period_end ?? null;
-        await upsertCustomer(customerId, {
+        const emailFromCustomer = await getStripeCustomerEmail(stripe, customerId);
+        const now = Date.now();
+        const invoicePayload: InvoicePayload = {
+          email: emailFromCustomer,
           stripeCustomerId: customerId,
           subscriptionId: subscription.id,
           status: subscription.status === "trialing" ? "trialing" : subscription.status === "active" ? "active" : "past_due",
+          plan: productId || "unknown",
           productId,
           priceId,
           priceAmount,
@@ -249,6 +281,15 @@ export async function POST(req: Request) {
           interval,
           intervalCount,
           currentPeriodEnd: subUpdatedPeriodEnd,
+          invoiceId: (subscription.latest_invoice && typeof subscription.latest_invoice === "string"
+            ? subscription.latest_invoice
+            : (subscription.latest_invoice as { id?: string } | null | undefined)?.id) ?? null,
+          amount: null,
+          updatedAt: now,
+          customerName: null,
+        };
+        await appendInvoiceByEmailOrUid(invoicePayload, {
+          fallbackEmail: emailFromCustomer,
         });
         break;
       }
@@ -257,11 +298,37 @@ export async function POST(req: Request) {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
         if (!customerId) break;
-
-        await upsertCustomer(customerId, {
+        const emailFromCustomer = await getStripeCustomerEmail(stripe, customerId);
+        const item = subscription.items.data[0];
+        const priceId = item?.price?.id ?? "";
+        const productId = typeof item?.price?.product === "string" ? item.price.product : ((item?.price?.product as Stripe.Product)?.id ?? "");
+        const priceAmount = item?.price?.unit_amount ?? null;
+        const priceCurrency = item?.price?.currency ?? null;
+        const interval = item?.price?.recurring?.interval ?? null;
+        const intervalCount = item?.price?.recurring?.interval_count ?? null;
+        const now = Date.now();
+        const invoicePayload: InvoicePayload = {
+          email: emailFromCustomer,
           stripeCustomerId: customerId,
           subscriptionId: subscription.id,
+          invoiceId: (subscription.latest_invoice && typeof subscription.latest_invoice === "string"
+            ? subscription.latest_invoice
+            : (subscription.latest_invoice as { id?: string } | null | undefined)?.id) ?? null,
+          amount: null,
+          plan: productId || "unknown",
+          productId,
+          priceId,
+          priceAmount,
+          priceCurrency,
+          interval,
+          intervalCount,
           status: "canceled",
+          currentPeriodEnd: (subscription as { current_period_end?: number }).current_period_end ?? null,
+          updatedAt: now,
+          customerName: null,
+        };
+        await appendInvoiceByEmailOrUid(invoicePayload, {
+          fallbackEmail: emailFromCustomer,
         });
         break;
       }

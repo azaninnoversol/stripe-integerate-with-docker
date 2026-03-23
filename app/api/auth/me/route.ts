@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getAdminAuth, getAdminFirestore, USERS_COLLECTION } from "@/lib/firebase-admin";
-import { AUTH_COOKIE_NAME } from "@/lib/auth-cookie";
+import { AUTH_COOKIE_NAME, buildClearCookieHeader } from "@/lib/auth-cookie";
 
 export const runtime = "nodejs";
 
@@ -31,6 +31,8 @@ export async function GET(req: Request) {
       updatedAt: userData?.updatedAt ?? null,
     });
   } catch {
-    return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
+    const response = NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
+    response.headers.set("set-cookie", buildClearCookieHeader());
+    return response;
   }
 }

@@ -4,8 +4,6 @@ import { getAdminFirestore, USERS_COLLECTION, INVOICES_SUBCOLLECTION } from "@/l
 
 export const runtime = "nodejs";
 
-const CUSTOMERS_COLLECTION = "stripeCustomers";
-
 export async function POST(req: Request) {
   let body: unknown;
   try {
@@ -34,22 +32,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing Stripe customer on subscription" }, { status: 400 });
     }
 
-    const directDocRef = db.collection(CUSTOMERS_COLLECTION).doc(stripeCustomerId);
-    const directSnap = await directDocRef.get();
-
-    let customerDocs = directSnap.exists ? [{ ref: directDocRef, data: () => (directSnap.data() ?? {}) as Record<string, unknown> }] : [];
-
-    if (!directSnap.exists) {
-      const byField = await db.collection(CUSTOMERS_COLLECTION).where("stripeCustomerId", "==", stripeCustomerId).limit(10).get();
-      customerDocs = byField.docs;
-    }
-
-    if (customerDocs.length === 0) {
-      customerDocs = [{ ref: directDocRef, data: () => ({}) }];
-    }
+    const usersByStripe = await db.collection(USERS_COLLECTION).where("stripeCustomerId", "==", stripeCustomerId).limit(10).get();
+    const userDocs = usersByStripe.docs;
 
     const hasRefundBeenUsed =
-      customerDocs.length > 0 && customerDocs.some((d) => (d.data() as { refundAlreadyUsed?: boolean }).refundAlreadyUsed === true);
+      userDocs.length > 0 && userDocs.some((d) => (d.data() as { refundAlreadyUsed?: boolean }).refundAlreadyUsed === true);
 
     let refunded = false;
     const latestInvoiceId = typeof stripeSub.latest_invoice === "string" ? stripeSub.latest_invoice : stripeSub.latest_invoice?.id;
@@ -116,12 +103,13 @@ export async function POST(req: Request) {
       updatePayload.refundedAt = now;
     }
 
-    await Promise.all(customerDocs.map((d) => d.ref.set(updatePayload, { merge: true })));
+    if (userDocs.length > 0) {
+      await Promise.all(userDocs.map((d) => d.ref.set(updatePayload, { merge: true })));
+    }
 
     // Update existing invoice doc for this subscription: status = cancelled (no new doc)
-    const usersByStripe = await db.collection(USERS_COLLECTION).where("stripeCustomerId", "==", stripeCustomerId).limit(1).get();
-    if (!usersByStripe.empty) {
-      const uid = usersByStripe.docs[0].id;
+    for (const userDoc of userDocs) {
+      const uid = userDoc.id;
       const invoicesSnap = await db
         .collection(USERS_COLLECTION)
         .doc(uid)

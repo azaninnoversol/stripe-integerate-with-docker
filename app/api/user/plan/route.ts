@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import { getAdminFirestore } from "@/lib/firebase-admin";
+import { getAdminFirestore, INVOICES_SUBCOLLECTION, USERS_COLLECTION } from "@/lib/firebase-admin";
 
 export const runtime = "nodejs";
-
-const COLLECTION = "stripeCustomers";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -15,21 +13,31 @@ export async function GET(req: Request) {
 
   try {
     const db = getAdminFirestore();
-    const snap = await db.collection(COLLECTION).where("email", "==", normalizedEmail).limit(1).get();
-
-    if (snap.empty) {
+    const usersSnap = await db.collection(USERS_COLLECTION).where("email", "==", normalizedEmail).limit(1).get();
+    if (usersSnap.empty) {
       return NextResponse.json({ plan: null, status: null, message: "No subscription found for this email" });
     }
 
-    const doc = snap.docs[0];
-    const data = doc.data();
+    const userDoc = usersSnap.docs[0];
+    const userData = userDoc.data();
+    const latestInvoiceSnap = await db
+      .collection(USERS_COLLECTION)
+      .doc(userDoc.id)
+      .collection(INVOICES_SUBCOLLECTION)
+      .orderBy("updatedAt", "desc")
+      .limit(1)
+      .get();
+
+    const invoiceData = latestInvoiceSnap.empty ? null : latestInvoiceSnap.docs[0].data();
+    const data = invoiceData ?? userData;
+
     return NextResponse.json({
       plan: data.plan ?? null,
       productId: data.productId ?? null,
       priceId: data.priceId ?? null,
       status: data.status ?? null,
       currentPeriodEnd: data.currentPeriodEnd ?? null,
-      stripeCustomerId: doc.id,
+      stripeCustomerId: (data.stripeCustomerId as string | undefined) ?? userData.stripeCustomerId ?? null,
       interval: data.interval ?? null,
       intervalCount: data.intervalCount ?? null,
       priceAmount: data.priceAmount ?? null,

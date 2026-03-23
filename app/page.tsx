@@ -63,7 +63,10 @@ function Page() {
         setCheckoutEmail((prev) => prev || data.email || "");
         setCheckoutName((prev) => prev || data.displayName || "");
       })
-      .catch(() => setUser(null))
+      .catch(() => {
+        setUser(null);
+        window.location.href = "/login";
+      })
       .finally(() => setAuthLoaded(true));
   }, []);
 
@@ -98,7 +101,7 @@ function Page() {
       } else {
         // Even if canceled, keep showing details (status/period) if available.
         setCardDetails(data ?? null);
-        setSelectedPlan(isCancelled ? null : data?.priceId ?? null);
+        setSelectedPlan(isCancelled ? null : (data?.priceId ?? null));
       }
     } catch (e) {
       alert(e instanceof Error ? e.message : "Failed to get selected plan from Firebase");
@@ -207,21 +210,17 @@ function Page() {
       className="flex min-h-screen flex-col items-center justify-center gap-10 bg-linear-to-b from-white to-gray-50 px-6 py-16"
     >
       <nav className="absolute right-6 top-6 flex items-center gap-3 text-sm">
-        {user ? (
-          <>
-            <span className="text-gray-600">{user.email ?? user.displayName ?? "Logged in"}</span>
-            <button
-              type="button"
-              onClick={async () => {
-                await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-                window.location.href = "/login";
-              }}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50"
-            >
-              Log out
-            </button>
-          </>
-        ) : null}
+        <span className="text-gray-600">{user?.email ?? user?.displayName ?? "Logged in"}</span>
+        <button
+          type="button"
+          onClick={async () => {
+            await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+            window.location.href = "/login";
+          }}
+          className="rounded-lg border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50"
+        >
+          Log out
+        </button>
       </nav>
       <h1 className="text-center text-4xl font-bold tracking-tight text-gray-900 sm:text-6xl">Choose Your Plan</h1>
 
@@ -269,7 +268,7 @@ function Page() {
       {productsLoaded && planLoaded && (
         <div className="w-full max-w-7xl mx-auto">
           <CardDetails
-            title={cardDetails ? cardDetails?.plan ?? "Current plan" : "No Active Plan"}
+            title={cardDetails ? (cardDetails?.plan ?? "Current plan") : "No Active Plan"}
             description={
               cardDetails?.customerName
                 ? `${cardDetails.customerName} · ${cardDetails?.email ?? checkoutEmail}`
