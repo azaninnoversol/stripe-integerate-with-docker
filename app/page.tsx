@@ -73,7 +73,6 @@ function Page() {
   React.useEffect(() => {
     if (!authLoaded) return;
 
-    // If user is not logged in (or email missing), there is no plan to fetch.
     if (!checkoutEmail) {
       setCardDetails(null);
       setSelectedPlan(null);
@@ -81,7 +80,6 @@ function Page() {
       return;
     }
 
-    // Keep loader until plan request finishes.
     setPlanLoaded(false);
     void getSelectedPlanFromFirebase(checkoutEmail);
   }, [checkoutEmail, authLoaded]);
