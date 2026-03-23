@@ -5,8 +5,21 @@ import { getAdminFirestore, USERS_COLLECTION } from "@/lib/firebase-admin";
 
 export const runtime = "nodejs";
 
+/**
+ * Stripe requires valid https URLs for success/cancel on production.
+ * - Prefer explicit NEXT_PUBLIC_APP_URL or APP_URL in env.
+ * - On Vercel, VERCEL_URL is set automatically (host only, no scheme) — use https.
+ */
 function getAppUrl() {
-  return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:5000";
+  const explicit = (process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "").trim();
+  if (explicit) {
+    return explicit.replace(/\/$/, "");
+  }
+  const vercel = (process.env.VERCEL_URL ?? "").trim();
+  if (vercel) {
+    return `https://${vercel.replace(/\/$/, "")}`;
+  }
+  return "http://localhost:5000";
 }
 
 function getMode(): Stripe.Checkout.SessionCreateParams.Mode {
