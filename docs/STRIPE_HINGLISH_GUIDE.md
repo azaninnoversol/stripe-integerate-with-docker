@@ -198,8 +198,7 @@ Isko update karke:
 ### C) Success/Cancel pages (optional but recommended)
 
 Stripe checkout ke baad user ko aap yahan bhejte ho:
-- `success_url`: `NEXT_PUBLIC_APP_URL + "/billing/success?session_id={CHECKOUT_SESSION_ID}"`
-- `cancel_url`: `NEXT_PUBLIC_APP_URL + "/billing/cancel"`
+- `success_url` / `cancel_url`: pehle `NEXT_PUBLIC_APP_URL` / `APP_URL`; warna Vercel preview/production par default `https://stripe-integrate.vercel.app`; local par `http://localhost:5000`
 
 Files:
 - `app/billing/success/page.tsx`

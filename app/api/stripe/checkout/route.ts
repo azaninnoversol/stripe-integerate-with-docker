@@ -5,21 +5,10 @@ import { getAdminFirestore, USERS_COLLECTION } from "@/lib/firebase-admin";
 
 export const runtime = "nodejs";
 
-/**
- * Stripe requires valid https URLs for success/cancel on production.
- * - Prefer explicit NEXT_PUBLIC_APP_URL or APP_URL in env.
- * - On Vercel, VERCEL_URL is set automatically (host only, no scheme) — use https.
- */
+const CANONICAL_APP_URL = "https://stripe-integrate.vercel.app";
+
 function getAppUrl() {
-  const explicit = (process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "").trim();
-  if (explicit) {
-    return explicit.replace(/\/$/, "");
-  }
-  const vercel = (process.env.VERCEL_URL ?? "").trim();
-  if (vercel) {
-    return `https://${vercel.replace(/\/$/, "")}`;
-  }
-  return "http://localhost:5000";
+  return CANONICAL_APP_URL;
 }
 
 function getMode(): Stripe.Checkout.SessionCreateParams.Mode {
@@ -67,18 +56,19 @@ export async function POST(req: Request) {
       }
     }
 
-    // Persist a stable mapping early so plan lookup can fallback by uid even
-    // when webhook delivery is delayed or missed in local development.
     if (customerId && uid) {
       const db = getAdminFirestore();
-      await db.collection(USERS_COLLECTION).doc(uid).set(
-        {
-          email: trimmedEmail || null,
-          stripeCustomerId: customerId,
-          updatedAt: Date.now(),
-        },
-        { merge: true }
-      );
+      await db
+        .collection(USERS_COLLECTION)
+        .doc(uid)
+        .set(
+          {
+            email: trimmedEmail || null,
+            stripeCustomerId: customerId,
+            updatedAt: Date.now(),
+          },
+          { merge: true },
+        );
     }
 
     const appUrl = getAppUrl();

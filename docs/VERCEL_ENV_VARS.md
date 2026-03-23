@@ -7,11 +7,17 @@ Ye variables **Vercel Dashboard** → Project → **Settings** → **Environment
 
 ---
 
+## Canonical app URL (Stripe redirects)
+
+Checkout API (`/api/stripe/checkout`) success/cancel URLs ke liye **`https://stripe-integrate.vercel.app`** use karta hai jab aap `NEXT_PUBLIC_APP_URL` / `APP_URL` set nahi karte — preview aur production dono par redirect wahi production URL par jayega. Custom domain ya fork ke liye `NEXT_PUBLIC_APP_URL` set karke override karo.
+
+---
+
 ## App + Stripe (required)
 
 | Name | Notes |
 |------|--------|
-| `NEXT_PUBLIC_APP_URL` | Live URL, e.g. `https://your-app.vercel.app` ya custom domain |
+| `NEXT_PUBLIC_APP_URL` | Optional override: `https://stripe-integrate.vercel.app` ya custom domain |
 | `STRIPE_SECRET_KEY` | `sk_live_...` ya `sk_test_...` |
 | `STRIPE_WEBHOOK_SECRET` | Stripe Dashboard → Webhooks → signing secret (`whsec_...`) — **production** endpoint ke liye |
 | `STRIPE_CHECKOUT_MODE` | Usually `subscription` |
@@ -76,7 +82,7 @@ Get-Content .env.production.local -Raw | vercel env add NEXT_PUBLIC_APP_URL prod
 Git Bash / bash (stdin pipe):
 
 ```bash
-printf '%s' "https://your-app.vercel.app" | vercel env add NEXT_PUBLIC_APP_URL production
+printf '%s' "https://stripe-integrate.vercel.app" | vercel env add NEXT_PUBLIC_APP_URL production
 ```
 
 > `FIREBASE_PRIVATE_KEY` multiline hai — Dashboard se paste karna zyada safe hai, ya `printf` se exact `\n` escape string.
