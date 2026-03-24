@@ -1,0 +1,10 @@
+DockerFile 1 recipe hoti jis se Image banati hai. mtlb project predctible enviroment ke sath har jagah ussi tarah chalta hai.
+har jagah mtlb : local , server , cloud
+
+image kia hai: image 1 ready-mate blueprint / template hai jis se container bantay hain.
+container kia hai: running app, Docker image se bana hua live environment hota hai. Isme tumhari app actually run karti hai
+
+mtlb
+image 1 recipe hai aur container us recipe se bana hua actual dish,
+yani image template hai and container us template ka running version hai.
+
