@@ -44,3 +44,5 @@ next-env.d.ts
 
 backend-project-def1a-firebase-adminsdk-fbsvc-028fdad6e2.json
 *-firebase-adminsdk-*.json
+temp_auto_push.bat
+temp_interactive_push.bat
